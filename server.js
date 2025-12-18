@@ -11,7 +11,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const MACHSHIP_API_TOKEN = process.env.MACHSHIP_API_TOKEN;
 const MACHSHIP_COMPANY_ID = process.env.MACHSHIP_COMPANY_ID;
-const MACHSHIP_BASE_URL = process.env.MACHSHIP_BASE_URL || 'https://live.machship.com/apiv2';
+const MACHSHIP_BASE_URL = process.env.MACHSHIP_BASE_URL || 'https://test.machship.com/apiv2';
 
 
 
