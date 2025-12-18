@@ -9,171 +9,195 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const MACHSHIP_API_TOKEN = process.env.MACHSHIP_API_TOKEN;
 const MACHSHIP_COMPANY_ID = process.env.MACHSHIP_COMPANY_ID;
-// IMPORTANT: Ensure this is https://live.machship.com/apiv2 in Render for production
 const MACHSHIP_BASE_URL = process.env.MACHSHIP_BASE_URL || 'https://live.machship.com/apiv2';
 
-// Warehouse details (Ensure these are set in Render Environment Variables)
+// Warehouse details
 const WAREHOUSE = {
     contactName: process.env.WAREHOUSE_CONTACT || 'Sky Energy Warehouse',
     companyName: process.env.WAREHOUSE_COMPANY || 'Sky Energy Production PTY LTD',
-    street: process.env.WAREHOUSE_STREET || 'Melbourne CBD',
-    suburb: process.env.WAREHOUSE_SUBURB || 'Melbourne',
-    state: process.env.WAREHOUSE_STATE || 'VIC',
-    postcode: process.env.WAREHOUSE_POSTCODE || '3000',
+    street: process.env.WAREHOUSE_STREET,
+    suburb: process.env.WAREHOUSE_SUBURB,
+    state: process.env.WAREHOUSE_STATE,
+    postcode: process.env.WAREHOUSE_POSTCODE,
     country: 'AU',
-    phone: process.env.WAREHOUSE_PHONE || '0400000000',
-    email: process.env.WAREHOUSE_EMAIL || 'asanka@team.newgenconsulting.au'
+    phone: process.env.WAREHOUSE_PHONE,
+    email: process.env.WAREHOUSE_EMAIL
 };
 
-// --- HELPER FUNCTIONS ---
+// ============================================
+// SESSION MANAGEMENT FOR MACHSHIP
+// ============================================
 
-// Function to call MachShip - This avoids the "localhost" loop error
+let sessionCookie = null;
+let sessionExpiry = null;
+
+// Function to login to MachShip and get session cookie
+const loginToMachShip = async () => {
+    try {
+        console.log('🔐 Attempting to login to MachShip...');
+        
+        const cleanToken = (MACHSHIP_API_TOKEN || '').trim().replace(/^Bearer\s+/i, '');
+        
+        // Try the login endpoint
+        const loginResponse = await axios.post(
+            `${MACHSHIP_BASE_URL.replace('/apiv2', '')}/login`,
+            {
+                token: cleanToken
+            },
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                validateStatus: () => true // Accept any status to see response
+            }
+        );
+        
+        console.log('Login response status:', loginResponse.status);
+        console.log('Login response headers:', loginResponse.headers);
+        
+        // Extract session cookie from response
+        const cookies = loginResponse.headers['set-cookie'];
+        if (cookies && cookies.length > 0) {
+            sessionCookie = cookies.map(cookie => cookie.split(';')[0]).join('; ');
+            sessionExpiry = Date.now() + (30 * 60 * 1000); // 30 minutes
+            console.log('✅ Session cookie obtained');
+            return true;
+        }
+        
+        console.warn('⚠️ No session cookie in login response');
+        return false;
+        
+    } catch (error) {
+        console.error('❌ Login failed:', error.message);
+        if (error.response) {
+            console.error('Login error response:', error.response.data);
+        }
+        return false;
+    }
+};
+
+// Check if session is valid
+const isSessionValid = () => {
+    const valid = sessionCookie && sessionExpiry && Date.now() < sessionExpiry;
+    if (!valid && sessionCookie) {
+        console.log('⏰ Session expired');
+    }
+    return valid;
+};
+
+// Enhanced function to call MachShip with multiple auth strategies
 const callMachShip = async (endpoint, data) => {
     const url = `${MACHSHIP_BASE_URL}${endpoint}`;
+    const cleanToken = (MACHSHIP_API_TOKEN || '').trim().replace(/^Bearer\s+/i, '');
     
-    // 1. Remove "Bearer " if it was accidentally pasted into the Environment Variable
-    const cleanToken = MACHSHIP_API_TOKEN.trim().replace('Bearer ', '');
+    console.log('📤 Calling MachShip:', endpoint);
     
-    return await axios.post(url, data, {
-        headers: {
-            // 2. The space after 'Bearer' is mandatory
+    // Strategy 1: Try with Bearer token + Session cookie (if available)
+    try {
+        // Login if no valid session
+        if (!isSessionValid()) {
+            console.log('No valid session, attempting login...');
+            await loginToMachShip();
+        }
+        
+        const headers = {
             'Authorization': `Bearer ${cleanToken}`,
             'Content-Type': 'application/json',
             'Accept': 'application/json'
+        };
+        
+        // Add session cookie if available
+        if (sessionCookie) {
+            headers['Cookie'] = sessionCookie;
+            console.log('Using session cookie');
         }
-    });
+        
+        console.log('Request headers:', { ...headers, Authorization: 'Bearer ***', Cookie: sessionCookie ? '***' : 'none' });
+        
+        const response = await axios.post(url, data, { headers });
+        console.log('✅ MachShip responded successfully');
+        return response;
+        
+    } catch (error) {
+        console.error('❌ MachShip call failed:', error.message);
+        
+        if (error.response) {
+            console.error('Error status:', error.response.status);
+            console.error('Error data:', error.response.data);
+            
+            // If it's a session error, try to re-login once
+            const errorData = String(error.response.data);
+            if (errorData.includes('Session') || errorData.includes('cookie')) {
+                console.log('Detected session error, clearing session and retrying once...');
+                sessionCookie = null;
+                sessionExpiry = null;
+                
+                // Try one more time with fresh login
+                const loginSuccess = await loginToMachShip();
+                if (loginSuccess) {
+                    const retryHeaders = {
+                        'Authorization': `Bearer ${cleanToken}`,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Cookie': sessionCookie
+                    };
+                    
+                    console.log('Retrying with fresh session...');
+                    return await axios.post(url, data, { headers: retryHeaders });
+                }
+            }
+        }
+        
+        throw error;
+    }
 };
 
-// --- ENDPOINTS ---
+// ============================================
+// ENDPOINTS
+// ============================================
+
+// Health check endpoint
+app.get('/', (req, res) => {
+    res.json({
+        status: 'OK',
+        message: 'MachShip Middleware is running',
+        timestamp: new Date().toISOString(),
+        session_active: isSessionValid()
+    });
+});
 
 app.get('/health', (req, res) => {
-    res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+    res.json({ 
+        status: 'healthy',
+        service: 'machship-middleware',
+        timestamp: new Date().toISOString(),
+        session_active: isSessionValid()
+    });
 });
 
-// 1. Get Shipping Quote
-app.post('/api/get-shipping-quote', async (req, res) => {
-    try {
-        console.log('=== QUOTE REQUEST RECEIVED ===');
-        const { destination_address, items, forklift_available } = req.body;
-
-        if (!destination_address || !items) {
-            return res.status(400).json({ success: false, error: 'Missing address or items' });
-        }
-
-        const machshipRequest = {
-            companyId: parseInt(MACHSHIP_COMPANY_ID),
-            fromLocation: WAREHOUSE,
-            toLocation: {
-                contactName: destination_address.name || 'Customer',
-                companyName: destination_address.company || '',
-                street: destination_address.street,
-                suburb: destination_address.suburb,
-                state: destination_address.state,
-                postcode: destination_address.postcode,
-                country: destination_address.country || 'AU',
-                phone: destination_address.phone || '',
-                email: destination_address.email || ''
-            },
-            items: items.map(item => ({
-                quantity: item.quantity || 1,
-                length: item.length || 100,
-                width: item.width || 50,
-                height: item.height || 30,
-                weight: item.weight || 25,
-                itemDescription: item.description || 'Battery'
-            })),
-            dangerousGoods: true,
-            tailLiftRequired: forklift_available === false || forklift_available === 'no'
-        };
-
-        const response = await callMachShip('/routes/returnrouteswithcomplexitems', machshipRequest);
-        
-        const routes = response.data.routes || [];
-        if (routes.length === 0) throw new Error('No routes returned from MachShip');
-
-        const cheapest = routes.reduce((prev, curr) => (curr.totalCost < prev.totalCost) ? curr : prev);
-
-        res.json({
-            success: true,
-            shipping_cost: cheapest.totalCost,
-            carrier: cheapest.carrierName,
-            service: cheapest.serviceName,
-            transit_days: cheapest.totalTransitDays
-        });
-
-    } catch (error) {
-        console.error('Quote Error:', error.response?.data || error.message);
-        res.status(error.response?.status || 500).json({
-            success: false,
-            error: 'MachShip API error',
-            details: error.response?.data || error.message
-        });
-    }
-});
-
-// 2. Create Consignment & 3. Zoho Webhook (Combined logic)
-app.post('/api/zoho-webhook', async (req, res) => {
-    try {
-        console.log('=== ZOHO WEBHOOK RECEIVED ===');
-        const orderData = req.body;
-
-        // Custom field logic for forklift
-        let forkliftAvailable = false;
-        if (orderData.custom_fields) {
-            const field = orderData.custom_fields.find(f => f.customfield_id === '171656000002394353');
-            if (field) forkliftAvailable = field.value === 'yes';
-        }
-
-        const consignmentRequest = {
-            companyId: parseInt(MACHSHIP_COMPANY_ID),
-            fromLocation: WAREHOUSE,
-            toLocation: {
-                contactName: orderData.shipping_address?.attention || orderData.customer_name,
-                companyName: orderData.shipping_address?.company_name || '',
-                street: orderData.shipping_address?.address,
-                suburb: orderData.shipping_address?.city,
-                state: orderData.shipping_address?.state_code,
-                postcode: orderData.shipping_address?.zip,
-                country: orderData.shipping_address?.country_code || 'AU'
-            },
-            items: orderData.line_items.map(item => ({
-                quantity: item.quantity,
-                length: 100, width: 50, height: 30, weight: 25, // Fallbacks
-                itemDescription: item.name
-            })),
-            dangerousGoods: true,
-            tailLiftRequired: !forkliftAvailable,
-            customerReference: orderData.salesorder_number,
-            orderNumber: orderData.salesorder_number
-        };
-
-        const response = await callMachShip('/consignments/createConsignmentwithComplexItems', consignmentRequest);
-        
-        res.json({
-            success: true,
-            consignment_id: response.data.consignmentId,
-            tracking_number: response.data.trackingNumber
-        });
-
-    } catch (error) {
-        console.error('Webhook Error:', error.response?.data || error.message);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// TEST ENDPOINT - Add this before app.listen()
+// Test endpoint for MachShip authentication
 app.get('/api/test-machship-auth', async (req, res) => {
     try {
         console.log('=== TESTING MACHSHIP AUTH ===');
-        console.log('Token (first 10 chars):', MACHSHIP_API_TOKEN.substring(0, 10));
+        console.log('Token (first 10 chars):', MACHSHIP_API_TOKEN?.substring(0, 10));
         console.log('Company ID:', MACHSHIP_COMPANY_ID);
         console.log('Base URL:', MACHSHIP_BASE_URL);
         
-        const cleanToken = MACHSHIP_API_TOKEN.trim().replace('Bearer ', '');
+        // Try to login
+        const loginSuccess = await loginToMachShip();
         
-        console.log('Making request to MachShip...');
+        if (!loginSuccess) {
+            return res.json({
+                success: false,
+                message: 'Login attempt completed but no session cookie received',
+                has_token: !!MACHSHIP_API_TOKEN,
+                has_company_id: !!MACHSHIP_COMPANY_ID,
+                token_preview: MACHSHIP_API_TOKEN?.substring(0, 10) + '...'
+            });
+        }
         
-        // Simple test request
+        // Try a simple quote request
         const testRequest = {
             companyId: parseInt(MACHSHIP_COMPANY_ID),
             fromLocation: WAREHOUSE,
@@ -197,48 +221,359 @@ app.get('/api/test-machship-auth', async (req, res) => {
             tailLiftRequired: false
         };
         
-        const response = await axios.post(
-            `${MACHSHIP_BASE_URL}/routes/returnrouteswithcomplexitems`,
-            testRequest,
-            {
-                headers: {
-                    'Authorization': `Bearer ${cleanToken}`,
-                    'Content-Type': 'application/json'
-                }
-            }
-        );
+        const response = await callMachShip('/routes/returnrouteswithcomplexitems', testRequest);
         
         console.log('✅ MachShip responded!');
-        console.log('Response:', response.data);
         
         res.json({
             success: true,
-            message: 'MachShip authentication works!',
+            message: 'MachShip authentication working!',
             routes_count: response.data.routes?.length || 0,
-            response: response.data
+            session_obtained: isSessionValid()
         });
         
     } catch (error) {
-        console.error('❌ MachShip Auth Test Failed');
-        console.error('Status:', error.response?.status);
-        console.error('Response:', error.response?.data);
-        console.error('Message:', error.message);
+        console.error('❌ Auth Test Failed');
+        console.error('Error:', error.message);
         
         res.json({
             success: false,
             error: error.message,
-            status: error.response?.status,
             machship_response: error.response?.data,
-            token_first_10: MACHSHIP_API_TOKEN?.substring(0, 10),
-            company_id: MACHSHIP_COMPANY_ID,
-            base_url: MACHSHIP_BASE_URL
+            token_preview: MACHSHIP_API_TOKEN?.substring(0, 10) + '...',
+            company_id: MACHSHIP_COMPANY_ID
+        });
+    }
+});
+
+// Get Shipping Quote
+app.post('/api/get-shipping-quote', async (req, res) => {
+    try {
+        console.log('=== NEW QUOTE REQUEST ===');
+        console.log('Timestamp:', new Date().toISOString());
+        
+        const { destination_address, items, forklift_available } = req.body;
+
+        console.log('Destination:', destination_address);
+        console.log('Items count:', items?.length);
+        console.log('Forklift available:', forklift_available);
+
+        // Validate request
+        if (!destination_address || !items || items.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: destination_address and items'
+            });
+        }
+
+        // Build MachShip request
+        const machshipRequest = {
+            companyId: parseInt(MACHSHIP_COMPANY_ID),
+            
+            fromLocation: {
+                contactName: WAREHOUSE.contactName,
+                companyName: WAREHOUSE.companyName,
+                street: WAREHOUSE.street,
+                suburb: WAREHOUSE.suburb,
+                state: WAREHOUSE.state,
+                postcode: WAREHOUSE.postcode,
+                country: WAREHOUSE.country,
+                phone: WAREHOUSE.phone,
+                email: WAREHOUSE.email
+            },
+            
+            toLocation: {
+                contactName: destination_address.name || 'Customer',
+                companyName: destination_address.company || '',
+                street: destination_address.street,
+                suburb: destination_address.suburb,
+                state: destination_address.state,
+                postcode: destination_address.postcode,
+                country: destination_address.country || 'AU',
+                phone: destination_address.phone || '',
+                email: destination_address.email || ''
+            },
+            
+            items: items.map(item => ({
+                quantity: item.quantity || 1,
+                length: item.length || 100,
+                width: item.width || 50,
+                height: item.height || 30,
+                weight: item.weight || 25,
+                itemDescription: item.description || item.name || 'Battery'
+            })),
+            
+            dangerousGoods: true,
+            tailLiftRequired: forklift_available === false || forklift_available === 'no'
+        };
+
+        console.log('MachShip Request:', JSON.stringify(machshipRequest, null, 2));
+
+        // Call MachShip API using our helper function
+        const machshipResponse = await callMachShip('/routes/returnrouteswithcomplexitems', machshipRequest);
+
+        console.log('MachShip response received');
+
+        // Check if we got routes
+        if (!machshipResponse.data || !machshipResponse.data.routes) {
+            console.error('No routes in response:', machshipResponse.data);
+            return res.status(500).json({
+                success: false,
+                error: 'No shipping routes available',
+                details: machshipResponse.data
+            });
+        }
+
+        const routes = machshipResponse.data.routes;
+        console.log(`Found ${routes.length} routes`);
+
+        if (routes.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'No shipping routes available for this destination'
+            });
+        }
+
+        // Find cheapest route
+        const cheapestRoute = routes.reduce((prev, current) => 
+            (current.totalCost < prev.totalCost) ? current : prev
+        );
+
+        console.log('Cheapest route:', {
+            carrier: cheapestRoute.carrierName,
+            service: cheapestRoute.serviceName,
+            cost: cheapestRoute.totalCost
+        });
+
+        // Return quote
+        res.json({
+            success: true,
+            shipping_cost: cheapestRoute.totalCost,
+            carrier: cheapestRoute.carrierName,
+            service: cheapestRoute.serviceName,
+            transit_days: cheapestRoute.totalTransitDays,
+            route_id: cheapestRoute.routeId,
+            all_options: routes.map(route => ({
+                carrier: route.carrierName,
+                service: route.serviceName,
+                cost: route.totalCost,
+                transit_days: route.totalTransitDays
+            }))
+        });
+
+    } catch (error) {
+        console.error('Error getting quote:', error.message);
+        
+        if (error.response) {
+            console.error('MachShip error response:', error.response.data);
+            return res.status(error.response.status).json({
+                success: false,
+                error: 'MachShip API error',
+                details: error.response.data
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            message: error.message
+        });
+    }
+});
+
+// Create Consignment
+app.post('/api/create-consignment', async (req, res) => {
+    try {
+        console.log('=== NEW CONSIGNMENT REQUEST ===');
+        console.log('Timestamp:', new Date().toISOString());
+        
+        const { order_number, destination_address, items, forklift_available, customer_email } = req.body;
+
+        console.log('Order Number:', order_number);
+        console.log('Destination:', destination_address);
+
+        // Validate request
+        if (!order_number || !destination_address || !items) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields'
+            });
+        }
+
+        // Build MachShip consignment request
+        const consignmentRequest = {
+            companyId: parseInt(MACHSHIP_COMPANY_ID),
+            
+            fromLocation: {
+                contactName: WAREHOUSE.contactName,
+                companyName: WAREHOUSE.companyName,
+                street: WAREHOUSE.street,
+                suburb: WAREHOUSE.suburb,
+                state: WAREHOUSE.state,
+                postcode: WAREHOUSE.postcode,
+                country: WAREHOUSE.country,
+                phone: WAREHOUSE.phone,
+                email: WAREHOUSE.email
+            },
+            
+            toLocation: {
+                contactName: destination_address.name || 'Customer',
+                companyName: destination_address.company || '',
+                street: destination_address.street,
+                suburb: destination_address.suburb,
+                state: destination_address.state,
+                postcode: destination_address.postcode,
+                country: destination_address.country || 'AU',
+                phone: destination_address.phone || '',
+                email: customer_email || destination_address.email || ''
+            },
+            
+            items: items.map(item => ({
+                quantity: item.quantity || 1,
+                length: item.length || 100,
+                width: item.width || 50,
+                height: item.height || 30,
+                weight: item.weight || 25,
+                itemDescription: item.description || item.name || 'Battery',
+                itemReference: item.sku || ''
+            })),
+            
+            dangerousGoods: true,
+            tailLiftRequired: forklift_available === false || forklift_available === 'no',
+            
+            customerReference: order_number,
+            orderNumber: order_number
+        };
+
+        console.log('Creating MachShip consignment...');
+
+        // Call MachShip API using our helper function
+        const machshipResponse = await callMachShip('/consignments/createConsignmentwithComplexItems', consignmentRequest);
+
+        console.log('Consignment created successfully');
+        console.log('Consignment ID:', machshipResponse.data.consignmentId);
+
+        // Return success
+        res.json({
+            success: true,
+            consignment_id: machshipResponse.data.consignmentId,
+            tracking_number: machshipResponse.data.trackingNumber,
+            carrier: machshipResponse.data.carrierName,
+            message: 'Consignment created successfully'
+        });
+
+    } catch (error) {
+        console.error('Error creating consignment:', error.message);
+        
+        if (error.response) {
+            console.error('MachShip error response:', error.response.data);
+            return res.status(error.response.status).json({
+                success: false,
+                error: 'MachShip API error',
+                details: error.response.data
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            message: error.message
+        });
+    }
+});
+
+// Zoho Commerce Webhook Handler
+app.post('/api/zoho-webhook', async (req, res) => {
+    try {
+        console.log('=== ZOHO WEBHOOK RECEIVED ===');
+        console.log('Timestamp:', new Date().toISOString());
+        console.log('Webhook data:', JSON.stringify(req.body, null, 2));
+
+        const orderData = req.body;
+
+        // Extract forklift availability from custom fields
+        let forkliftAvailable = false;
+        if (orderData.custom_fields && orderData.custom_fields.length > 0) {
+            const forkliftField = orderData.custom_fields.find(
+                field => field.customfield_id === '171656000002394353'
+            );
+            if (forkliftField) {
+                forkliftAvailable = forkliftField.value === 'yes';
+            }
+        }
+
+        // Prepare destination address
+        const destination = {
+            name: orderData.shipping_address?.attention || orderData.customer_name,
+            company: orderData.shipping_address?.company_name || '',
+            street: orderData.shipping_address?.address,
+            suburb: orderData.shipping_address?.city,
+            state: orderData.shipping_address?.state_code,
+            postcode: orderData.shipping_address?.zip,
+            country: orderData.shipping_address?.country_code || 'AU',
+            phone: orderData.shipping_address?.phone || '',
+            email: orderData.customer_email || ''
+        };
+
+        // Prepare items
+        const items = orderData.line_items.map(item => ({
+            quantity: item.quantity,
+            length: item.package_details?.length || 100,
+            width: item.package_details?.width || 50,
+            height: item.package_details?.height || 30,
+            weight: item.package_details?.weight || 25,
+            description: item.name,
+            sku: item.sku
+        }));
+
+        // Create consignment
+        const consignmentRequest = {
+            order_number: orderData.salesorder_number,
+            destination_address: destination,
+            items: items,
+            forklift_available: forkliftAvailable,
+            customer_email: orderData.customer_email
+        };
+
+        // Call our own create consignment endpoint
+        const result = await axios.post(
+            `https://machship-middleware.onrender.com/api/create-consignment`,
+            consignmentRequest
+        );
+
+        console.log('Webhook processing complete');
+
+        res.json({
+            success: true,
+            message: 'Order processed successfully',
+            consignment: result.data
+        });
+
+    } catch (error) {
+        console.error('Webhook error:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
         });
     }
 });
 
 // Start server
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Base URL: ${MACHSHIP_BASE_URL}`);
-    console.log(`Token Loaded: ${MACHSHIP_API_TOKEN ? 'YES' : 'NO'}`);
+    console.log('=================================');
+    console.log('MachShip Middleware Server');
+    console.log('=================================');
+    console.log(`Status: Running`);
+    console.log(`Port: ${PORT}`);
+    console.log(`Time: ${new Date().toISOString()}`);
+    console.log(`Token loaded: ${!!MACHSHIP_API_TOKEN}`);
+    console.log(`Company ID: ${MACHSHIP_COMPANY_ID}`);
+    console.log('=================================');
+    console.log('Available endpoints:');
+    console.log('- GET  /health');
+    console.log('- GET  /api/test-machship-auth');
+    console.log('- POST /api/get-shipping-quote');
+    console.log('- POST /api/create-consignment');
+    console.log('- POST /api/zoho-webhook');
+    console.log('=================================');
 });
