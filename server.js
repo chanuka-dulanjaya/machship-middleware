@@ -93,64 +93,72 @@ const callMachShip = async (endpoint, data) => {
     
     console.log('📤 Calling MachShip:', endpoint);
     
-    // Strategy 1: Try with Bearer token + Session cookie (if available)
-    try {
-        // Login if no valid session
-        if (!isSessionValid()) {
-            console.log('No valid session, attempting login...');
-            await loginToMachShip();
-        }
-        
-        const headers = {
-            'Authorization': `Bearer ${cleanToken}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        };
-        
-        // Add session cookie if available
-        if (sessionCookie) {
-            headers['Cookie'] = sessionCookie;
-            console.log('Using session cookie');
-        }
-        
-        console.log('Request headers:', { ...headers, Authorization: 'Bearer ***', Cookie: sessionCookie ? '***' : 'none' });
-        
-        const response = await axios.post(url, data, { headers });
-        console.log('✅ MachShip responded successfully');
-        return response;
-        
-    } catch (error) {
-        console.error('❌ MachShip call failed:', error.message);
-        
-        if (error.response) {
-            console.error('Error status:', error.response.status);
-            console.error('Error data:', error.response.data);
-            
-            // If it's a session error, try to re-login once
-            const errorData = String(error.response.data);
-            if (errorData.includes('Session') || errorData.includes('cookie')) {
-                console.log('Detected session error, clearing session and retrying once...');
-                sessionCookie = null;
-                sessionExpiry = null;
-                
-                // Try one more time with fresh login
-                const loginSuccess = await loginToMachShip();
-                if (loginSuccess) {
-                    const retryHeaders = {
-                        'Authorization': `Bearer ${cleanToken}`,
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json',
-                        'Cookie': sessionCookie
-                    };
-                    
-                    console.log('Retrying with fresh session...');
-                    return await axios.post(url, data, { headers: retryHeaders });
-                }
+    // Try multiple authentication strategies
+    const authStrategies = [
+        {
+            name: 'Bearer Token',
+            headers: {
+                'Authorization': `Bearer ${cleanToken}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+        },
+        {
+            name: 'X-API-Key',
+            headers: {
+                'X-API-Key': cleanToken,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+        },
+        {
+            name: 'api-key',
+            headers: {
+                'api-key': cleanToken,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+        },
+        {
+            name: 'Authorization Token',
+            headers: {
+                'Authorization': `Token ${cleanToken}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
             }
         }
-        
-        throw error;
+    ];
+    
+    let lastError = null;
+    
+    for (const strategy of authStrategies) {
+        try {
+            console.log(`Trying auth strategy: ${strategy.name}`);
+            
+            const response = await axios.post(url, data, { 
+                headers: strategy.headers,
+                validateStatus: (status) => status < 500 // Don't throw on 4xx
+            });
+            
+            // Check if successful
+            if (response.status === 200 && response.data && !String(response.data).includes('Session ID')) {
+                console.log(`✅ SUCCESS with ${strategy.name}`);
+                console.log('Response data type:', typeof response.data);
+                return response;
+            } else {
+                console.log(`❌ ${strategy.name} failed: ${response.status}`);
+                console.log('Response:', String(response.data).substring(0, 100));
+            }
+            
+        } catch (error) {
+            console.log(`❌ ${strategy.name} errored:`, error.message);
+            lastError = error;
+        }
     }
+    
+    // If all strategies failed, throw the last error
+    console.error('❌ All authentication strategies failed');
+    throw lastError || new Error('All authentication methods failed');
 };
 
 // ============================================
