@@ -161,6 +161,81 @@ app.post('/api/zoho-webhook', async (req, res) => {
     }
 });
 
+// TEST ENDPOINT - Add this before app.listen()
+app.get('/api/test-machship-auth', async (req, res) => {
+    try {
+        console.log('=== TESTING MACHSHIP AUTH ===');
+        console.log('Token (first 10 chars):', MACHSHIP_API_TOKEN.substring(0, 10));
+        console.log('Company ID:', MACHSHIP_COMPANY_ID);
+        console.log('Base URL:', MACHSHIP_BASE_URL);
+        
+        const cleanToken = MACHSHIP_API_TOKEN.trim().replace('Bearer ', '');
+        
+        console.log('Making request to MachShip...');
+        
+        // Simple test request
+        const testRequest = {
+            companyId: parseInt(MACHSHIP_COMPANY_ID),
+            fromLocation: WAREHOUSE,
+            toLocation: {
+                contactName: "Test",
+                street: "123 Test St",
+                suburb: "Melbourne",
+                state: "VIC",
+                postcode: "3000",
+                country: "AU"
+            },
+            items: [{
+                quantity: 1,
+                length: 100,
+                width: 50,
+                height: 30,
+                weight: 25,
+                itemDescription: "Test Item"
+            }],
+            dangerousGoods: false,
+            tailLiftRequired: false
+        };
+        
+        const response = await axios.post(
+            `${MACHSHIP_BASE_URL}/routes/returnrouteswithcomplexitems`,
+            testRequest,
+            {
+                headers: {
+                    'Authorization': `Bearer ${cleanToken}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+        
+        console.log('✅ MachShip responded!');
+        console.log('Response:', response.data);
+        
+        res.json({
+            success: true,
+            message: 'MachShip authentication works!',
+            routes_count: response.data.routes?.length || 0,
+            response: response.data
+        });
+        
+    } catch (error) {
+        console.error('❌ MachShip Auth Test Failed');
+        console.error('Status:', error.response?.status);
+        console.error('Response:', error.response?.data);
+        console.error('Message:', error.message);
+        
+        res.json({
+            success: false,
+            error: error.message,
+            status: error.response?.status,
+            machship_response: error.response?.data,
+            token_first_10: MACHSHIP_API_TOKEN?.substring(0, 10),
+            company_id: MACHSHIP_COMPANY_ID,
+            base_url: MACHSHIP_BASE_URL
+        });
+    }
+});
+
 // Start server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
