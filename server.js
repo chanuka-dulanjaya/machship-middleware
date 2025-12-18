@@ -2,6 +2,10 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 
+console.log('--- Startup Config Check ---');
+console.log('Token Loaded:', MACHSHIP_API_TOKEN ? 'YES (Starts with ' + MACHSHIP_API_TOKEN.substring(0,5) + '...)' : 'NO (MISSING)');
+console.log('Company ID:', MACHSHIP_COMPANY_ID);
+
 // Parse JSON bodies
 app.use(express.json());
 
