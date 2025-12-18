@@ -2,9 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 
-console.log('--- Startup Config Check ---');
-console.log('Token Loaded:', MACHSHIP_API_TOKEN ? 'YES (Starts with ' + MACHSHIP_API_TOKEN.substring(0,5) + '...)' : 'NO (MISSING)');
-console.log('Company ID:', MACHSHIP_COMPANY_ID);
+
 
 // Parse JSON bodies
 app.use(express.json());
@@ -14,6 +12,12 @@ const PORT = process.env.PORT || 3000;
 const MACHSHIP_API_TOKEN = process.env.MACHSHIP_API_TOKEN;
 const MACHSHIP_COMPANY_ID = process.env.MACHSHIP_COMPANY_ID;
 const MACHSHIP_BASE_URL = process.env.MACHSHIP_BASE_URL || 'https://live.machship.com/apiv2';
+
+
+console.log('--- Startup Config Check ---');
+console.log('Token Loaded:', MACHSHIP_API_TOKEN ? 'YES (Starts with ' + MACHSHIP_API_TOKEN.substring(0,5) + '...)' : 'NO (MISSING)');
+console.log('Company ID:', MACHSHIP_COMPANY_ID);
+
 
 // Warehouse details
 const WAREHOUSE = {
