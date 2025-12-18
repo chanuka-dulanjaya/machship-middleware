@@ -30,15 +30,16 @@ const WAREHOUSE = {
 // Function to call MachShip - This avoids the "localhost" loop error
 const callMachShip = async (endpoint, data) => {
     const url = `${MACHSHIP_BASE_URL}${endpoint}`;
-    console.log(`Calling MachShip: ${url}`);
     
-    // Safety check: ensure token doesn't have double "Bearer"
-    const cleanToken = MACHSHIP_API_TOKEN.replace('Bearer ', '');
+    // 1. Remove "Bearer " if it was accidentally pasted into the Environment Variable
+    const cleanToken = MACHSHIP_API_TOKEN.trim().replace('Bearer ', '');
     
     return await axios.post(url, data, {
         headers: {
+            // 2. The space after 'Bearer' is mandatory
             'Authorization': `Bearer ${cleanToken}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
         }
     });
 };
