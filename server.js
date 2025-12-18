@@ -14,10 +14,6 @@ const MACHSHIP_COMPANY_ID = process.env.MACHSHIP_COMPANY_ID;
 const MACHSHIP_BASE_URL = process.env.MACHSHIP_BASE_URL || 'https://live.machship.com/apiv2';
 
 
-console.log('--- Startup Config Check ---');
-console.log('Token Loaded:', MACHSHIP_API_TOKEN ? 'YES (Starts with ' + MACHSHIP_API_TOKEN.substring(0,5) + '...)' : 'NO (MISSING)');
-console.log('Company ID:', MACHSHIP_COMPANY_ID);
-
 
 // Warehouse details
 const WAREHOUSE = {
@@ -401,6 +397,9 @@ app.post('/api/zoho-webhook', async (req, res) => {
 app.listen(PORT, () => {
     console.log('=================================');
     console.log('MachShip Middleware Server');
+    console.log(`Token Status: ${process.env.MACHSHIP_API_TOKEN ? 'LOADED' : 'MISSING'}`);
+    console.log(`Company ID: ${process.env.MACHSHIP_COMPANY_ID}`);
+    console.log(`Base URL: ${process.env.MACHSHIP_BASE_URL}`);
     console.log('=================================');
     console.log(`Status: Running`);
     console.log(`Port: ${PORT}`);
@@ -413,3 +412,4 @@ app.listen(PORT, () => {
     console.log('- POST /api/zoho-webhook');
     console.log('=================================');
 });
+
