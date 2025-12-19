@@ -139,7 +139,7 @@ def test_auth():
         
         # Now test with actual quote request
         test_request = {
-            'companyId': int(MACHSHIP_COMPANY_ID),
+            'companyId': MACHSHIP_COMPANY_ID,
             'fromLocation': WAREHOUSE,
             'toLocation': {
                 'contactName': 'Test Customer',
@@ -186,6 +186,7 @@ def get_shipping_quote():
     try:
         print("=== NEW QUOTE REQUEST ===")
         print(f"Timestamp: {datetime.now().isoformat()}")
+        print(f"Company ID: {MACHSHIP_COMPANY_ID} (type: {type(MACHSHIP_COMPANY_ID).__name__})")
         
         data = request.get_json()
         
@@ -206,7 +207,7 @@ def get_shipping_quote():
         
         # Build MachShip request
         machship_request = {
-            'companyId': int(MACHSHIP_COMPANY_ID),
+            'companyId': MACHSHIP_COMPANY_ID,
             'fromLocation': WAREHOUSE,
             'toLocation': {
                 'contactName': destination.get('name', 'Customer'),
@@ -313,7 +314,7 @@ def create_consignment():
         
         # Build consignment request
         consignment_request = {
-            'companyId': int(MACHSHIP_COMPANY_ID),
+            'companyId': MACHSHIP_COMPANY_ID,
             'fromLocation': WAREHOUSE,
             'toLocation': {
                 'contactName': destination.get('name', 'Customer'),
