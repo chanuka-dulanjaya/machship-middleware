@@ -33,22 +33,22 @@ def init_machship_session():
     
     print("🔐 Initializing MachShip session...")
     
-    # Clean token
+    # Clean token (remove Bearer if accidentally included)
     token = MACHSHIP_API_TOKEN.strip().replace('Bearer ', '')
     
-    # Set up session headers
+    # Set up session headers - MachShip uses 'token' header, NOT Authorization
     session.headers.update({
-        'Authorization': f'Bearer {token}',
+        'token': token,  # MachShip's custom header
         'Content-Type': 'application/json',
         'Accept': 'application/json'
     })
     
     session_initialized = True
-    print("✅ Session initialized")
+    print("✅ Session initialized with token header")
     return True
 
 def call_machship(endpoint, data):
-    """Call MachShip API with multiple authentication strategies"""
+    """Call MachShip API with correct authentication"""
     
     if not session_initialized:
         init_machship_session()
@@ -58,52 +58,33 @@ def call_machship(endpoint, data):
     
     print(f"📤 Calling MachShip: {endpoint}")
     
-    # Try multiple authentication methods
-    auth_strategies = [
-        {'name': 'Bearer Token', 'headers': {'Authorization': f'Bearer {token}'}},
-        {'name': 'X-API-Key', 'headers': {'X-API-Key': token}},
-        {'name': 'api-key', 'headers': {'api-key': token}},
-        {'name': 'Token Auth', 'headers': {'Authorization': f'Token {token}'}},
-    ]
+    # MachShip uses 'token' header for authentication (NOT Authorization: Bearer)
+    headers = {
+        'token': token,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
     
-    for strategy in auth_strategies:
-        try:
-            print(f"Trying: {strategy['name']}")
-            
-            headers = {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                **strategy['headers']
-            }
-            
-            response = session.post(url, json=data, headers=headers, timeout=30)
-            
-            print(f"Status: {response.status_code}")
-            
-            # Check if successful
-            if response.status_code == 200:
-                response_data = response.json()
-                
-                # Check if it's not an error message
-                if isinstance(response_data, dict) and 'routes' in response_data:
-                    print(f"✅ SUCCESS with {strategy['name']}")
-                    return response_data
-                elif isinstance(response_data, str) and 'Session ID' in response_data:
-                    print(f"❌ {strategy['name']}: Session error")
-                    continue
-                else:
-                    print(f"✅ SUCCESS with {strategy['name']}")
-                    return response_data
-            else:
-                print(f"❌ {strategy['name']}: {response.status_code}")
-                print(f"Response: {response.text[:100]}")
-                
-        except Exception as e:
-            print(f"❌ {strategy['name']} exception: {str(e)}")
-            continue
+    print(f"Using token header (first 10 chars): {token[:10]}...")
     
-    # All strategies failed
-    raise Exception("All authentication methods failed")
+    try:
+        response = session.post(url, json=data, headers=headers, timeout=30)
+        
+        print(f"Response status: {response.status_code}")
+        
+        # Check if successful
+        if response.status_code == 200:
+            response_data = response.json()
+            print("✅ MachShip responded successfully!")
+            return response_data
+        else:
+            print(f"❌ Request failed: {response.status_code}")
+            print(f"Response: {response.text[:200]}")
+            raise Exception(f"MachShip API error: {response.status_code} - {response.text[:100]}")
+            
+    except Exception as e:
+        print(f"❌ Error calling MachShip: {str(e)}")
+        raise
 
 @app.route('/')
 def home():
@@ -132,7 +113,31 @@ def test_auth():
         print(f"Token (first 10): {MACHSHIP_API_TOKEN[:10] if MACHSHIP_API_TOKEN else 'MISSING'}")
         print(f"Company ID: {MACHSHIP_COMPANY_ID}")
         
-        # Simple test request
+        # Test the authenticate/ping endpoint first
+        token = MACHSHIP_API_TOKEN.strip().replace('Bearer ', '')
+        
+        print("Testing with /authenticate/ping endpoint...")
+        ping_response = requests.post(
+            f"{MACHSHIP_BASE_URL.replace('/apiv2', '')}/apiv2/authenticate/ping",
+            headers={
+                'token': token,
+                'Content-Type': 'application/json'
+            },
+            timeout=10
+        )
+        
+        print(f"Ping response: {ping_response.status_code}")
+        print(f"Ping body: {ping_response.text}")
+        
+        if ping_response.status_code != 200:
+            return jsonify({
+                'success': False,
+                'message': 'Token authentication failed',
+                'status_code': ping_response.status_code,
+                'response': ping_response.text
+            })
+        
+        # Now test with actual quote request
         test_request = {
             'companyId': int(MACHSHIP_COMPANY_ID),
             'fromLocation': WAREHOUSE,
@@ -164,8 +169,7 @@ def test_auth():
             'success': True,
             'message': 'MachShip authentication working!',
             'routes_count': routes_count,
-            'has_token': bool(MACHSHIP_API_TOKEN),
-            'has_company_id': bool(MACHSHIP_COMPANY_ID)
+            'ping_status': 'OK'
         })
         
     except Exception as e:
@@ -173,8 +177,6 @@ def test_auth():
         return jsonify({
             'success': False,
             'error': str(e),
-            'has_token': bool(MACHSHIP_API_TOKEN),
-            'has_company_id': bool(MACHSHIP_COMPANY_ID),
             'token_preview': MACHSHIP_API_TOKEN[:10] if MACHSHIP_API_TOKEN else None
         })
 
