@@ -74,13 +74,27 @@ def call_machship(endpoint, data):
         
         # Check if successful
         if response.status_code == 200:
-            response_data = response.json()
-            print("✅ MachShip responded successfully!")
-            return response_data
+            try:
+                response_text = response.text
+                print(f"Response length: {len(response_text)} chars")
+                
+                if not response_text or response_text.strip() == "":
+                    print("❌ Empty response body")
+                    raise Exception("MachShip returned empty response")
+                
+                response_data = response.json()
+                print("✅ JSON parsed successfully!")
+                print(f"Response type: {type(response_data)}")
+                
+                return response_data
+            except ValueError as json_error:
+                print(f"❌ Failed to parse JSON: {json_error}")
+                print(f"Response text (first 500 chars): {response.text[:500]}")
+                raise Exception("Invalid JSON response from MachShip")
         else:
             print(f"❌ Request failed: {response.status_code}")
             print(f"Response: {response.text[:200]}")
-            raise Exception(f"MachShip API error: {response.status_code} - {response.text[:100]}")
+            raise Exception(f"MachShip API error: {response.status_code}")
             
     except Exception as e:
         print(f"❌ Error calling MachShip: {str(e)}")
@@ -248,14 +262,54 @@ def get_shipping_quote():
         # Call MachShip
         response = call_machship('/routes/returnrouteswithcomplexitems', machship_request)
         
+        print(f"=== RESPONSE ANALYSIS ===")
+        print(f"Response is None: {response is None}")
+        print(f"Response type: {type(response)}")
+        
+        if response is None:
+            print("❌ ERROR: Response is None")
+            return jsonify({
+                'success': False,
+                'error': 'Empty response from MachShip',
+                'details': 'MachShip API returned None'
+            }), 500
+        
+        if not isinstance(response, dict):
+            print(f"❌ ERROR: Response is not a dictionary, it's {type(response)}")
+            return jsonify({
+                'success': False,
+                'error': 'Invalid response type from MachShip',
+                'details': str(response)
+            }), 500
+        
+        print(f"Response keys: {list(response.keys())}")
+        
         # Check for routes - MachShip returns nested structure
         routes = None
-        if response and 'object' in response and 'routes' in response['object']:
-            routes = response['object']['routes']
-        elif response and 'routes' in response:
-            routes = response['routes']
         
-        if not routes:
+        # Check if 'object' key exists
+        if 'object' in response:
+            obj = response.get('object')
+            print(f"'object' found, type: {type(obj)}")
+            
+            if obj is not None and isinstance(obj, dict):
+                if 'routes' in obj:
+                    routes = obj.get('routes')
+                    print(f"Routes found in object, count: {len(routes) if routes else 0}")
+                else:
+                    print(f"'routes' not in object. Object keys: {list(obj.keys())}")
+            else:
+                print(f"'object' is None or not a dict")
+        
+        # Fallback: check for routes at root level
+        elif 'routes' in response:
+            routes = response.get('routes')
+            print(f"Routes found at root level, count: {len(routes) if routes else 0}")
+        else:
+            print(f"No 'object' or 'routes' key found in response")
+        
+        if routes is None or routes == []:
+            print("❌ ERROR: No routes found")
             return jsonify({
                 'success': False,
                 'error': 'No routes in response',
