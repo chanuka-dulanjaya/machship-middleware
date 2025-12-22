@@ -140,6 +140,7 @@ def test_auth():
         # Now test with actual quote request
         test_request = {
             'companyId': MACHSHIP_COMPANY_ID,
+            'dgsDeclaration': False,  # Test without DG first
             'fromLocation': WAREHOUSE,
             'toLocation': {
                 'contactName': 'Test Customer',
@@ -150,12 +151,15 @@ def test_auth():
                 'country': 'AU'
             },
             'items': [{
+                'itemType': 'Carton',
+                'name': 'Test Item',
                 'quantity': 1,
-                'length': 100,
-                'width': 50,
-                'height': 30,
-                'weight': 25,
-                'itemDescription': 'Test Item'
+                'standardItem': {
+                    'length': 100,
+                    'width': 50,
+                    'height': 30,
+                    'weight': 25
+                }
             }],
             'dangerousGoods': False,
             'tailLiftRequired': False
@@ -208,6 +212,7 @@ def get_shipping_quote():
         # Build MachShip request
         machship_request = {
             'companyId': MACHSHIP_COMPANY_ID,
+            'dgsDeclaration': True,  # Required for dangerous goods (batteries)
             'fromLocation': WAREHOUSE,
             'toLocation': {
                 'contactName': destination.get('name', 'Customer'),
@@ -222,12 +227,15 @@ def get_shipping_quote():
             },
             'items': [
                 {
+                    'itemType': 'Carton',  # Required: Carton, Pallet, Satchel, etc.
+                    'name': item.get('description', item.get('name', 'Battery')),  # Required: name or sku
                     'quantity': item.get('quantity', 1),
-                    'length': item.get('length', 100),
-                    'width': item.get('width', 50),
-                    'height': item.get('height', 30),
-                    'weight': item.get('weight', 25),
-                    'itemDescription': item.get('description', item.get('name', 'Battery'))
+                    'standardItem': {  # Required wrapper for dimensions
+                        'length': item.get('length', 100),
+                        'width': item.get('width', 50),
+                        'height': item.get('height', 30),
+                        'weight': item.get('weight', 25)
+                    }
                 }
                 for item in items
             ],
@@ -315,6 +323,7 @@ def create_consignment():
         # Build consignment request
         consignment_request = {
             'companyId': MACHSHIP_COMPANY_ID,
+            'dgsDeclaration': True,  # Required for dangerous goods
             'fromLocation': WAREHOUSE,
             'toLocation': {
                 'contactName': destination.get('name', 'Customer'),
@@ -329,13 +338,16 @@ def create_consignment():
             },
             'items': [
                 {
+                    'itemType': 'Carton',
+                    'name': item.get('description', item.get('name', 'Battery')),
+                    'sku': item.get('sku', ''),
                     'quantity': item.get('quantity', 1),
-                    'length': item.get('length', 100),
-                    'width': item.get('width', 50),
-                    'height': item.get('height', 30),
-                    'weight': item.get('weight', 25),
-                    'itemDescription': item.get('description', item.get('name', 'Battery')),
-                    'itemReference': item.get('sku', '')
+                    'standardItem': {
+                        'length': item.get('length', 100),
+                        'width': item.get('width', 50),
+                        'height': item.get('height', 30),
+                        'weight': item.get('weight', 25)
+                    }
                 }
                 for item in items
             ],
