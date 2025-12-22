@@ -248,15 +248,19 @@ def get_shipping_quote():
         # Call MachShip
         response = call_machship('/routes/returnrouteswithcomplexitems', machship_request)
         
-        # Check for routes
-        if not response or 'routes' not in response:
+        # Check for routes - MachShip returns nested structure
+        routes = None
+        if response and 'object' in response and 'routes' in response['object']:
+            routes = response['object']['routes']
+        elif response and 'routes' in response:
+            routes = response['routes']
+        
+        if not routes:
             return jsonify({
                 'success': False,
                 'error': 'No routes in response',
                 'details': response
             }), 500
-        
-        routes = response['routes']
         print(f"Found {len(routes)} routes")
         
         if len(routes) == 0:
@@ -265,24 +269,24 @@ def get_shipping_quote():
                 'error': 'No shipping routes available'
             }), 404
         
-        # Find cheapest
-        cheapest = min(routes, key=lambda r: r['totalCost'])
+        # Find cheapest - use correct MachShip response fields
+        cheapest = min(routes, key=lambda r: r['consignmentTotal']['totalSellPrice'])
         
-        print(f"Cheapest: {cheapest['carrierName']} - ${cheapest['totalCost']}")
+        print(f"Cheapest: {cheapest['carrier']['name']} - ${cheapest['consignmentTotal']['totalSellPrice']}")
         
         return jsonify({
             'success': True,
-            'shipping_cost': cheapest['totalCost'],
-            'carrier': cheapest['carrierName'],
-            'service': cheapest['serviceName'],
-            'transit_days': cheapest['totalTransitDays'],
-            'route_id': cheapest['routeId'],
+            'shipping_cost': cheapest['consignmentTotal']['totalSellPrice'],
+            'carrier': cheapest['carrier']['name'],
+            'service': cheapest['carrierService']['name'],
+            'transit_days': cheapest['despatchOptions'][0]['totalDays'] if cheapest.get('despatchOptions') else 0,
+            'route_id': cheapest.get('companyCarrierAccountId'),
             'all_options': [
                 {
-                    'carrier': route['carrierName'],
-                    'service': route['serviceName'],
-                    'cost': route['totalCost'],
-                    'transit_days': route['totalTransitDays']
+                    'carrier': route['carrier']['name'],
+                    'service': route['carrierService']['name'],
+                    'cost': route['consignmentTotal']['totalSellPrice'],
+                    'transit_days': route['despatchOptions'][0]['totalDays'] if route.get('despatchOptions') else 0
                 }
                 for route in routes
             ]
